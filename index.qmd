@@ -1,0 +1,179 @@
+---
+title: Old English relatives
+authors:
+  - name: Norah Jones
+    affiliation: The University
+    roles: writing
+    corresponding: true
+bibliography: references.bib
+---
+
+## Read and clean data
+
+```{r}
+#| label: setup
+
+library(tidyverse)
+theme_set(theme_light())
+library(readxl)
+library(brms)
+library(ggdist)
+```
+
+```{r}
+#| label: read-data
+
+aelfric <- read_xlsx("data/Relatives.xlsx", sheet = "AElive") |>
+  # Remove observations to be excluded
+  filter(include == "y") |> 
+  mutate(
+    manuscript = "Aelfric"
+  )
+
+colnames(aelfric) <- c("text", "file", "parallel_set", "parallel_set_id", "dem", "mention", "include", "position", "correlative", "the", "divinity", "generic", "be", "antecedent", "manuscript")
+
+gdh <- read_xlsx("data/Relatives.xlsx", sheet = "GDH") |>
+  # Remove observations to be excluded
+  filter(include == "y") |> 
+  mutate(
+    manuscript = "GDH"
+  )
+
+colnames(gdh) <- c("text", "file", "parallel_set", "parallel_set_id", "dem", "mention", "include", "position", "correlative", "the", "divinity", "generic", "be", "antecedent", "extra", "manuscript")
+
+bede_narrative <- read_xlsx("data/Relatives.xlsx", sheet = "Bede Narrative") |>
+  # Remove observations to be excluded
+  filter(include == "y") |> 
+  mutate(
+    manuscript = "Bede narrative"
+  )
+
+colnames(bede_narrative) <- c("text", "file", "PDE", "latin", "latin_cxn", "parallel_set", "parallel_set_id", "dem", "mention", "include", "position", "correlative", "the", "divinity", "generic", "be", "detail", "antecedent", "is_called", "extraposed", "verb_only_intervenes", "noun_only_intervenes", "detail2", "notes", "manuscript")
+
+relatives <- bind_rows(aelfric, gdh, bede_narrative)
+
+relatives <- relatives |>
+  group_by(manuscript, mention, position) |> 
+  add_count(name = "grand_tot") |>
+  ungroup() |> 
+  mutate(
+    dem = recode_factor(dem, n = "no"),
+    mention = recode_factor(mention, n = "other", y = "second"),
+    position = recode_factor(position, n = "other", y = "early"),
+    divinity = recode_factor(divinity, n = "other", y = "divinity"),
+    mention_position = interaction(mention, position, lex.order = TRUE),
+    ante_name = ifelse(antecedent == "name", "name", "other"),
+    mention_potential = case_when(
+      mention == "other" & str_detect(detail, "^[Pp]otential") ~ "second",
+      TRUE ~ mention
+    ),
+    mention_potential = as.factor(mention_potential),
+    dem_2 = case_when(
+      the == "y" & dem == "se" ~ "no",
+      TRUE ~ dem
+    )
+  )
+
+relatives_potential_counts <- relatives |>
+  filter(divinity == "other", dem != "thatte") |>
+  count(manuscript, dem_2, mention_potential, position, grand_tot) |>
+  drop_na()
+```
+
+## Regression model
+
+```{r}
+#| label: rel-bm
+
+rel_bm <- brm(
+  n ~
+    manuscript * dem_2 * mention_potential * position +
+    offset(log(grand_tot)),
+  data = relatives_potential_counts,
+  family = poisson,
+  cores = 4,
+  file = "data/cache/rel_bm",
+  prior = c(
+    prior(normal(4, 1.5), class = Intercept),
+    prior(normal(0, 2), class = b)
+  ),
+  seed = 9899
+)
+```
+
+```{r}
+#| label: rel-bm-cond
+
+rel_bm_draws <- as_draws_df(rel_bm)
+
+new_data <- expand_grid(
+  dem_2 = c("no", "se", "that"),
+  mention_potential = c("other", "second"),
+  position = c("other", "early"),
+  manuscript = c("Aelfric", "GDH", "Bede narrative"),
+  grand_tot = 100
+)
+
+headings <- new_data %>%
+  unite("heads", dem_2:manuscript, sep = ".") %>%
+  pull(heads)
+
+rel_bm_cond <- posterior_epred(rel_bm, newdata = new_data)
+colnames(rel_bm_cond) <- headings
+
+rel_bm_cond <- as_tibble(rel_bm_cond)
+
+rel_bm_cond_l <- rel_bm_cond %>%
+  pivot_longer(everything(), names_to = "condition") %>%
+  separate(
+    condition,
+    c("dem_2", "mention_potential", "position", "manuscript"),
+    sep = "\\."
+  ) %>%
+  arrange(manuscript, dem_2, mention_potential, position)
+```
+
+```{r}
+rel_bm_cond_l %>%
+  filter(manuscript == "Aelfric") %>%
+  ggplot(aes(dem_2, value)) +
+  stat_interval(.width = c(0.5, 0.7, 0.9, 0.95), linewidth = 4) +
+  facet_grid(position ~ mention_potential, labeller = label_both) +
+  coord_cartesian(ylim = c(0, 100)) +
+  scale_color_brewer(direction = -1) +
+  labs(
+    title = "Aelfric manuscript",
+    x = "Demonstrative", y = "Number of relatives (norm)"
+  )
+
+ggsave("img/rel-bm-aelfric.png", width = 7, height = 5)
+
+rel_bm_cond_l %>%
+  filter(manuscript == "GDH") %>%
+  ggplot(aes(dem_2, value)) +
+  stat_interval(.width = c(0.5, 0.7, 0.9, 0.95), linewidth = 4) +
+  facet_grid(position ~ mention_potential, labeller = label_both) +
+  coord_cartesian(ylim = c(0, 100)) +
+  scale_color_brewer(direction = -1) +
+  labs(
+    title = "GDH manuscript",
+    x = "Demonstrative", y = "Number of relatives (norm)"
+  )
+
+ggsave("img/rel-bm-gdh.png", width = 7, height = 5)
+
+rel_bm_cond_l %>%
+  filter(manuscript == "Bede narrative") %>%
+  ggplot(aes(dem_2, value)) +
+  stat_interval(.width = c(0.5, 0.7, 0.9, 0.95), linewidth = 4) +
+  facet_grid(position ~ mention_potential, labeller = label_both) +
+  coord_cartesian(ylim = c(0, 100)) +
+  scale_color_brewer(direction = -1) +
+  labs(
+    title = "Bede manuscript",
+    x = "Demonstrative", y = "Number of relatives (norm)"
+  )
+
+ggsave("img/rel-bm-bede.png", width = 7, height = 5)
+```
+
