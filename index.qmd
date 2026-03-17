@@ -25,7 +25,10 @@ library(ggdist)
 
 aelfric <- read_xlsx("data/Relatives.xlsx", sheet = "AElive") |>
   # Remove observations to be excluded
-  filter(include == "y") |> 
+  filter(
+    include == "y",
+    !(D == "se" & þe == "y")
+  ) |> 
   mutate(
     manuscript = "Aelfric"
   )
@@ -34,7 +37,10 @@ colnames(aelfric) <- c("text", "file", "parallel_set", "parallel_set_id", "dem",
 
 gdh <- read_xlsx("data/Relatives.xlsx", sheet = "GDH") |>
   # Remove observations to be excluded
-  filter(include == "y") |> 
+  filter(
+    include == "y",
+    !(D == "se" & þe == "y")
+  ) |> 
   mutate(
     manuscript = "GDH"
   )
