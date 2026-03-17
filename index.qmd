@@ -43,7 +43,10 @@ colnames(gdh) <- c("text", "file", "parallel_set", "parallel_set_id", "dem", "me
 
 bede_narrative <- read_xlsx("data/Relatives.xlsx", sheet = "Bede Narrative") |>
   # Remove observations to be excluded
-  filter(include == "y") |> 
+  filter(
+    include == "y",
+    !(D == "se" & Đe == "y")
+  ) |> 
   mutate(
     manuscript = "Bede narrative"
   )
